@@ -85,6 +85,8 @@ struct AsteroidStrideArray {
     }
 };
 
+extern uint32_t colli_checks;
+extern uint32_t total_checks;
 
 // Dummy collision function
 NOINLINE 
@@ -126,35 +128,35 @@ __forceinline static void update_asteroids_base_impl(T& asteroids, double platfo
 
 __forceinline static void update_asteroids_loop_unroll(AsteroidStrideArray& asteroids, double platform_vel) {
 
-    double* pos_x = asteroids.position_x.data();
-    double* pos_y = asteroids.position_y.data();
-    const double* vel_x = asteroids.velocity_x.data();
-    const double* vel_y = asteroids.velocity_y.data();
-    uint8_t* tbd = asteroids.to_be_deleted.data();
+    double* pos_x = std::assume_aligned<32>(asteroids.position_x.data());
+    double* pos_y = std::assume_aligned<32>(asteroids.position_y.data());
+    const double* vel_x = std::assume_aligned<32>(asteroids.velocity_x.data());
+    const double* vel_y = std::assume_aligned<32>(asteroids.velocity_y.data());
+    uint8_t* tbd = std::assume_aligned<32>(asteroids.to_be_deleted.data());
 
-    __m256d scale = _mm256_set1_pd(256.0);
-    __m256d platform_vel_vec = _mm256_set1_pd(platform_vel);
-
-    double new_positions_x[4];
-    double new_positions_y[4];
-
-    alignas(16) int32_t tile_x[4], tile_y[4], colli[4];
+	alignas(32) double vel = platform_vel;
+    alignas(32) double new_positions_x[4];
+    alignas(32) double new_positions_y[4];
+    alignas(32) int32_t tile_x[4];
+    alignas(32) int32_t tile_y[4];
+    alignas(32) int32_t colli[4];
 
     for (uint32_t i = 0; i < asteroids.size(); i += 4) {
         uint32_t tbd_masks = *reinterpret_cast<uint32_t*>(tbd + i);
         if (tbd_masks == 0x01010101) continue; // unlikely but why not
 
         // load 4 elements at once
-        __m256d px = _mm256_loadu_pd(pos_x + i);
-        __m256d py = _mm256_loadu_pd(pos_y + i);
-        __m256d vx = _mm256_loadu_pd(vel_x + i);
-        __m256d vy = _mm256_loadu_pd(vel_y + i);
+        __m256d px = _mm256_load_pd(pos_x + i);
+        __m256d py = _mm256_load_pd(pos_y + i);
+        __m256d vx = _mm256_load_pd(vel_x + i);
+        __m256d vy = _mm256_load_pd(vel_y + i);
 
         // add velocities
         __m256d new_px = _mm256_add_pd(px, vx);
-        __m256d new_py = _mm256_add_pd(py, _mm256_add_pd(vy, platform_vel_vec));
+        __m256d new_py = _mm256_add_pd(py, _mm256_add_pd(vy, _mm256_set1_pd(platform_vel)));
 
         // scale positions by 256.0
+        __m256d scale = _mm256_set1_pd(256.0);
         __m256d old_x_scaled = _mm256_mul_pd(px, scale);
         __m256d old_y_scaled = _mm256_mul_pd(py, scale);
         __m256d new_x_scaled = _mm256_mul_pd(new_px, scale);
@@ -167,7 +169,6 @@ __forceinline static void update_asteroids_loop_unroll(AsteroidStrideArray& aste
         __m128i new_yi = _mm256_cvttpd_epi32(new_y_scaled);
 
         // >> 8 to get tile positions
-        __m128i shift = _mm_set1_epi32(8);
         old_xi = _mm_srai_epi32(old_xi, 8);
         old_yi = _mm_srai_epi32(old_yi, 8);
         new_xi = _mm_srai_epi32(new_xi, 8);
@@ -186,8 +187,8 @@ __forceinline static void update_asteroids_loop_unroll(AsteroidStrideArray& aste
         }*/
 
         // break vectors to scalars
-        _mm256_storeu_pd(new_positions_x, new_px);
-        _mm256_storeu_pd(new_positions_y, new_py);
+        _mm256_store_pd(new_positions_x, new_px);
+        _mm256_store_pd(new_positions_y, new_py);
         _mm_store_si128((__m128i*) tile_x, new_xi);
         _mm_store_si128((__m128i*) tile_y, new_yi);
         _mm_store_si128((__m128i*) colli, coll_mask);

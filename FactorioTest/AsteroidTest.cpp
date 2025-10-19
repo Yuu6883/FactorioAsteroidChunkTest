@@ -7,10 +7,13 @@
 using namespace std; // so joever
 using namespace chrono;
 
+// Around 20 ticks to travel 1 tile at idle
+constexpr double V_SCALE = 1.0 / 20.0;
+
 uniform_int_distribution<uint16_t> proto_dist(1, 4);
 bernoulli_distribution bool_dist(0.05);
 uniform_real_distribution<double> pos_dist(-1000.0, 1000.0);
-uniform_real_distribution<double> vel_dist(-1.0, 1.0);
+uniform_real_distribution<double> vel_dist(-V_SCALE, V_SCALE);
 
 static inline void populate_asteroids(vector<Asteroid>& asteroids, uint32_t seed) {
     mt19937 rng(seed);
@@ -149,7 +152,8 @@ int main() {
     uint32_t warmup_ticks = 10;
     uint32_t benchmark_ticks = 1000;
 
-    double platform_vel = -4.0 / 60.0;
+	// added speed is about 0.1 units per tick at 300 speed
+    double platform_vel = 1.0 / 10.0;
 
     uint32_t N = 1048576;
 
@@ -202,9 +206,5 @@ int main() {
     }
 
     validate(a1, a2);
-
-    /*printf("Fast path hit rate: %d / %d (%.2f%%)\n", fast_path_hit, fast_path_total,
-        fast_path_total > 0 ? (static_cast<double>(fast_path_hit) / static_cast<double>(fast_path_total)) * 100.0 : 0.0);*/
-
     return 0;
 }
