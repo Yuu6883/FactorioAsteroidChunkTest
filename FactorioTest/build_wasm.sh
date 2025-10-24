@@ -1,0 +1,17 @@
+emcc main.cpp normal.cpp -O3 \
+  -msimd128 \
+  -std=c++20 \
+  -s IGNORE_MISSING_MAIN=1 \
+  -s WARN_ON_UNDEFINED_SYMBOLS=0 \
+  -s FILESYSTEM=0 \
+  -s STANDALONE_WASM=1 \
+  -s ALLOW_MEMORY_GROWTH=1 \
+  -s MAXIMUM_MEMORY=4GB \
+  -s STACK_OVERFLOW_CHECK=0 \
+  -s INVOKE_RUN=0 \
+  -s MALLOC=dlmalloc \
+  -s IMPORTED_MEMORY=1 \
+  -s EXPORTED_FUNCTIONS="['_run_bench']" \
+  -s INITIAL_MEMORY=64MB \
+  -gsource-map \
+  -o WebGPUDemo/assets/asteroid.wasm

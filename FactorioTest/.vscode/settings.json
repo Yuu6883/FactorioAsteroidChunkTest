@@ -1,0 +1,13 @@
+{
+    "files.associations": {
+        "*.as": "typescript",
+        "*.ush": "hlsl",
+        "*.usf": "hlsl",
+        "vector": "cpp",
+        "random": "cpp",
+        "chrono": "cpp",
+        "forward_list": "cpp",
+        "list": "cpp",
+        "xstring": "cpp"
+    }
+}
