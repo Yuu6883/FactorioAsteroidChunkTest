@@ -26,6 +26,8 @@ static inline __m256i mod32(__m256i val) {
     return result;
 }
 
+static uint32_t tick = 0;
+
 void update_asteroids_avx2(AsteroidStrideArray& asteroids, const Map* map,
                            double platform_vel_double) {
     auto pos_x = ASSUME_ALIGNED(
@@ -36,7 +38,6 @@ void update_asteroids_avx2(AsteroidStrideArray& asteroids, const Map* map,
         reinterpret_cast<int16_t*>(asteroids.velocity_x.data()), 32);
     const auto vel_y = ASSUME_ALIGNED(
         reinterpret_cast<int16_t*>(asteroids.velocity_y.data()), 32);
-    auto flags = ASSUME_ALIGNED(asteroids.flags.data(), 32);
 
     const Map::TileMask EMPTY_MASK{};
     // Precompute map bounds in fixed-point
@@ -124,23 +125,29 @@ void update_asteroids_avx2(AsteroidStrideArray& asteroids, const Map* map,
         __m256i bit_index =
             _mm256_add_epi32(tx, _mm256_mullo_epi32(ty, _mm256_set1_epi32(32)));
 
-        __m256i dx = _mm256_sub_epi32(_mm256_set1_epi32(CENTER_X) ,new_px);
-        __m256i dy = _mm256_sub_epi32(_mm256_set1_epi32(CENTER_Y), new_py);
+        __m256i dx = _mm256_srai_epi32(
+            _mm256_sub_epi32(_mm256_set1_epi32(CENTER_X), new_px),
+            FRACTION_BITS);
+        __m256i dy = _mm256_srai_epi32(
+            _mm256_sub_epi32(_mm256_set1_epi32(CENTER_Y), new_py),
+            FRACTION_BITS);
 
         // Widen to 64-bit to prevent overflow
-        __m256i new_px_lo =
-            _mm256_cvtepi32_epi64(_mm256_castsi256_si128(dx));
+        __m256i new_px_lo = _mm256_cvtepi32_epi64(_mm256_castsi256_si128(dx));
         __m256i new_px_hi =
             _mm256_cvtepi32_epi64(_mm256_extracti128_si256(dx, 1));
-        __m256i new_py_lo =
-            _mm256_cvtepi32_epi64(_mm256_castsi256_si128(dy));
+        __m256i new_py_lo = _mm256_cvtepi32_epi64(_mm256_castsi256_si128(dy));
         __m256i new_py_hi =
             _mm256_cvtepi32_epi64(_mm256_extracti128_si256(dy, 1));
 
+        __m256i vy_plus =
+            _mm256_add_epi32(vy, _mm256_set1_epi32(platform_vel.raw_value()));
+
         __m256i vx_lo = _mm256_cvtepi32_epi64(_mm256_castsi256_si128(vx));
         __m256i vx_hi = _mm256_cvtepi32_epi64(_mm256_extracti128_si256(vx, 1));
-        __m256i vy_lo = _mm256_cvtepi32_epi64(_mm256_castsi256_si128(vy));
-        __m256i vy_hi = _mm256_cvtepi32_epi64(_mm256_extracti128_si256(vy, 1));
+        __m256i vy_lo = _mm256_cvtepi32_epi64(_mm256_castsi256_si128(vy_plus));
+        __m256i vy_hi =
+            _mm256_cvtepi32_epi64(_mm256_extracti128_si256(vy_plus, 1));
 
         // Compute dot products
         __m256i dot_lo = _mm256_add_epi64(_mm256_mullo_epi64(new_px_lo, vx_lo),
@@ -170,23 +177,28 @@ void update_asteroids_avx2(AsteroidStrideArray& asteroids, const Map* map,
             bool remove = bool(colli | bye.m256i_i32[j]);
 
             auto k = i + j;
-            asteroids.state[write_index] = asteroids.state[k];
-            asteroids.flags[write_index] = asteroids.flags[k];
-
-            asteroids.position_x[write_index] = fixed_20_11::from_raw_value(
-                static_cast<int32_t>(new_px.m256i_i32[j]));
-            asteroids.position_y[write_index] = fixed_20_11::from_raw_value(
-                static_cast<int32_t>(new_py.m256i_i32[j]));
-
-            asteroids.velocity_x[write_index] = asteroids.velocity_x[k];
-            asteroids.velocity_y[write_index] = asteroids.velocity_y[k];
-
-            write_index += !remove & (k < end);
+            asteroids.state[k] |= uint16_t(remove) << REMOVE_BIT_INDEX;
         }
+
+        _mm256_store_si256((__m256i*)(pos_x + i), new_px);
+        _mm256_store_si256((__m256i*)(pos_y + i), new_py);
     }
 
-    auto removed = asteroids.size() - write_index;
-    asteroids.resize(write_index);
-    // cout << "Remaining asteroids: " << asteroids.size() << " (removed " <<
-    // removed << " this tick) %8 = " << (write_index % 8) << endl;
+    // asteroids.resize(write_index);
+    tick++;
+
+    if (tick % 32) return;
+    
+    {
+        uint32_t write_index = 0;
+        for (uint32_t i = 0; i < end; i++) {
+            const auto flags = asteroids.state[write_index] = asteroids.state[i];
+            asteroids.position_x[write_index] = asteroids.position_x[i];
+            asteroids.position_y[write_index] = asteroids.position_y[i];
+            asteroids.velocity_x[write_index] = asteroids.velocity_x[i];
+            asteroids.velocity_y[write_index] = asteroids.velocity_y[i];
+            write_index += 1 - ((flags >> REMOVE_BIT_INDEX) & 1);
+        }
+        asteroids.resize(write_index);
+    }
 }

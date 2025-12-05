@@ -121,8 +121,8 @@ void update_asteroids_fixed(vector<AsteroidFixed>& asteroids,
         // x and y
         const Map::TileMask* tile = &tile_data[tile_indices[tile_index]];
 
-        auto dx = CENTER_X - new_px;
-        auto dy = CENTER_Y - new_py;
+        int64_t dx = (CENTER_X - new_px) >> FRACTION_BITS;
+        int64_t dy = (CENTER_Y - new_py) >> FRACTION_BITS;
         int64_t dot = int64_t(dx) * int64_t(vx) +
                       int64_t(dy) * int64_t(vy + platform_vel);
         auto bye = clamped & (dot <= 0);
@@ -146,6 +146,8 @@ void update_asteroids_fixed(vector<AsteroidFixed>& asteroids,
     // cout << "Remaining asteroids: " << asteroids.size() << " (removed " <<
     // removed << " this tick) %8 = " << (write_index % 8) << endl;
 }
+
+static uint32_t tick = 0;
 
 void update_asteroids_fixed(AsteroidStrideArray& asteroids,
                             const Map* __restrict map,
@@ -171,8 +173,11 @@ void update_asteroids_fixed(AsteroidStrideArray& asteroids,
     auto tile_data = map->tile_data.data();
 
     uint32_t write_index = 0;
+    uint32_t end = asteroids.size();
 
-    for (uint32_t i = 0; i < asteroids.size(); i++) {
+    for (uint32_t i = 0; i < end; i++) {
+        // if (asteroids.state[i] & REMOVE_BIT) continue;
+
         // raw values
         auto vx = static_cast<int32_t>(asteroids.velocity_x[i].raw_value());
         auto vy = static_cast<int32_t>(asteroids.velocity_y[i].raw_value());
@@ -206,6 +211,12 @@ void update_asteroids_fixed(AsteroidStrideArray& asteroids,
 
         // TriggerEffect::apply(dyingTriggerEffect)
 
+        asteroids.state[i] |= uint16_t(remove) << REMOVE_BIT_INDEX;
+        ;
+        asteroids.position_x[i] = fixed_20_11::from_raw_value(new_px);
+        asteroids.position_y[i] = fixed_20_11::from_raw_value(new_py);
+
+        /*
         asteroids.state[write_index] = asteroids.state[i];
         asteroids.flags[write_index].data = asteroids.flags[i].data;
         asteroids.position_x[write_index] = fixed_20_11::from_raw_value(new_px);
@@ -213,24 +224,27 @@ void update_asteroids_fixed(AsteroidStrideArray& asteroids,
         asteroids.velocity_x[write_index] = asteroids.velocity_x[i];
         asteroids.velocity_y[write_index] = asteroids.velocity_y[i];
 
-#ifndef __EMSCRIPTEN__
-
-        if (asteroids.position_y[write_index] < fixed_20_11(-601)) {
-            printf(
-                "Asteroid %d p: (%.6f, %.6f) v: (%.6f, %.6f) has gone off the "
-                "map! clamped: %s, dot: %lli\n",
-                write_index, dx * TO_DOUBLE, dy * TO_DOUBLE,
-                asteroids.velocity_x[i].raw_value() * TO_DOUBLE,
-                asteroids.velocity_y[i].raw_value() * TO_DOUBLE,
-                clamped ? "true" : "false", dot);
-        }
-#endif
-
         write_index += !remove;
+        */
     }
 
-    auto removed = asteroids.size() - write_index;
-    asteroids.resize(write_index);
-    // cout << "Remaining asteroids: " << asteroids.size() << " (removed " <<
-    // removed << " this tick) %8 = " << (write_index % 8) << endl;
+    // asteroids.resize(write_index);
+
+    tick++;
+
+    if (tick % 32) return;
+
+    {
+        uint32_t write_index = 0;
+        for (uint32_t i = 0; i < end; i++) {
+            const auto flags = asteroids.state[write_index] =
+                asteroids.state[i];
+            asteroids.position_x[write_index] = asteroids.position_x[i];
+            asteroids.position_y[write_index] = asteroids.position_y[i];
+            asteroids.velocity_x[write_index] = asteroids.velocity_x[i];
+            asteroids.velocity_y[write_index] = asteroids.velocity_y[i];
+            write_index += 1 - ((flags >> REMOVE_BIT_INDEX) & 1);
+        }
+        asteroids.resize(write_index);
+    }
 }

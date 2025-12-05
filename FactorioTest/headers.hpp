@@ -15,8 +15,12 @@
 #endif
 
 #ifdef __EMSCRIPTEN__
+#ifndef VSCODE_STFU
 #include <emscripten.h>
-#else
+#endif
+#endif
+
+#ifndef EMSCRIPTEN_KEEPALIVE
 #define EMSCRIPTEN_KEEPALIVE
 #endif
 
@@ -39,8 +43,8 @@ constexpr uint8_t RSR_FLAG = 1 << 2;
 
 struct AsteroidChunkFlag {
     uint8_t data;
-    uint8_t to_be_deleted() { return data & TBD_FLAG; };
-    uint8_t is_reserved() { return data & RSR_FLAG; }
+    uint8_t to_be_deleted() const { return data & TBD_FLAG; };
+    uint8_t is_reserved() const { return data & RSR_FLAG; }
 };
 
 struct alignas(64) AsteroidDouble {
@@ -55,8 +59,7 @@ struct alignas(64) AsteroidDouble {
 #pragma pack(push, 1)
 struct alignas(32) AsteroidFixed {
     char pad_1[8];  // vtable in original struct
-    uint16_t prototype_id;
-    uint16_t non_game_state_index;
+    uint32_t state;
     AsteroidChunkFlag flag;
     Vec<fixed_20_11> position;
     Vec<fixed_4_11> velocity;
@@ -66,12 +69,14 @@ struct alignas(32) AsteroidFixed {
 template <typename T>
 using AlignedVector = vector<T, HugePageAllocator<T>>;
 
+#define REMOVE_BIT_INDEX 15
+#define REMOVE_BIT (1 << REMOVE_BIT_INDEX)
+
 struct AsteroidStrideArray {
     size_t actual_size = 0;
     size_t capacity = 0;
 
     AlignedVector<uint32_t> state;
-    AlignedVector<AsteroidChunkFlag> flags;
     AlignedVector<fixed_20_11> position_x;
     AlignedVector<fixed_20_11> position_y;
     AlignedVector<fixed_4_11> velocity_x;
@@ -83,12 +88,11 @@ struct AsteroidStrideArray {
         int64_t old_size = actual_size;
         actual_size = new_size;
         // printf("Resizing asteroid stride array: %zu -> %zu\n", old_size,
-        // new_size); round up to multiple of 4 or 8
-        constexpr size_t mask = 7;
+        // new_size); round up to multiple of 4 or 8 or 16
+        constexpr size_t mask = 0xF;
         capacity = new_size = (new_size + mask) & ~static_cast<size_t>(mask);
 
         state.resize(new_size);
-        flags.resize(new_size);
         position_x.resize(new_size);
         position_y.resize(new_size);
         velocity_x.resize(new_size);
@@ -96,9 +100,8 @@ struct AsteroidStrideArray {
 
         int64_t c = int64_t(new_size) - old_size;
         if (c > 0) {
-            std::fill_n(&state[old_size], c, 0);
+            std::fill_n(&state[old_size], c, REMOVE_BIT);
             AsteroidChunkFlag zero{};
-            std::fill_n(&flags[old_size], c, zero);
             std::fill_n(&position_x[old_size], c, fixed_20_11(0));
             std::fill_n(&position_y[old_size], c, fixed_20_11(0));
             std::fill_n(&velocity_x[old_size], c, fixed_4_11(0));
@@ -108,7 +111,6 @@ struct AsteroidStrideArray {
 
     void shrink() {
         state.shrink_to_fit();
-        flags.shrink_to_fit();
         position_x.shrink_to_fit();
         position_y.shrink_to_fit();
         velocity_x.shrink_to_fit();
@@ -154,4 +156,7 @@ NOINLINE void update_asteroids_fixed(AsteroidStrideArray& asteroids,
 #ifndef __EMSCRIPTEN__
 NOINLINE void update_asteroids_avx2(AsteroidStrideArray& asteroids,
                                     const Map* map, double platform_vel);
+// no perf improvement, removed for failing validation somehow
+// NOINLINE void update_asteroids_avx512(AsteroidStrideArray& asteroids,
+//                                       const Map* map, double platform_vel);
 #endif

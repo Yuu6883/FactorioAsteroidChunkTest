@@ -8,6 +8,8 @@
         "chrono": "cpp",
         "forward_list": "cpp",
         "list": "cpp",
-        "xstring": "cpp"
+        "xstring": "cpp",
+        "utility": "cpp",
+        "cmath": "cpp"
     }
 }
